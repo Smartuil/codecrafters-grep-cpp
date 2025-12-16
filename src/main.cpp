@@ -385,23 +385,24 @@ int main(int argc, char* argv[])
     // TODO: Uncomment the code below to pass the first stage
     
     std::string input_line;
-    std::getline(std::cin, input_line);
+    bool any_match = false;
     
-    try 
+    while (std::getline(std::cin, input_line))
     {
-        if (match_pattern(input_line, pattern)) 
+        try 
         {
-            std::cout << input_line << std::endl;
-            return 0;
+            if (match_pattern(input_line, pattern)) 
+            {
+                std::cout << input_line << std::endl;
+                any_match = true;
+            }
         } 
-        else 
+        catch (const std::runtime_error& e) 
         {
+            std::cerr << e.what() << std::endl;
             return 1;
         }
-    } 
-    catch (const std::runtime_error& e) 
-    {
-        std::cerr << e.what() << std::endl;
-        return 1;
     }
+    
+    return any_match ? 0 : 1;
 }
