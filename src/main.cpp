@@ -16,6 +16,22 @@ bool match_pattern(const std::string& input_line, const std::string& pattern)
         return false;
     }
     
+    // Handle \w character class - matches any word character (a-z, A-Z, 0-9, _)
+    if (pattern == "\\w") 
+    {
+        for (char c : input_line) 
+        {
+            if ((c >= 'a' && c <= 'z') || 
+                (c >= 'A' && c <= 'Z') || 
+                (c >= '0' && c <= '9') || 
+                c == '_')
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    
     if (pattern.length() == 1) 
     {
         return input_line.find(pattern) != std::string::npos;
