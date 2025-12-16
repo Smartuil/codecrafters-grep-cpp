@@ -106,11 +106,27 @@ bool match_at_position(const std::string& input, size_t start, const std::vector
 
 bool match_pattern(const std::string& input_line, const std::string& pattern) 
 {
-    std::vector<std::string> elements = parse_pattern(pattern);
+    std::string actual_pattern = pattern;
+    bool anchor_start = false;
+    
+    // Check for start anchor ^
+    if (!pattern.empty() && pattern[0] == '^')
+    {
+        anchor_start = true;
+        actual_pattern = pattern.substr(1);
+    }
+    
+    std::vector<std::string> elements = parse_pattern(actual_pattern);
     
     if (elements.empty())
     {
         return true;
+    }
+    
+    // If anchored to start, only try matching at position 0
+    if (anchor_start)
+    {
+        return match_at_position(input_line, 0, elements);
     }
     
     // Try matching at each position in the input
