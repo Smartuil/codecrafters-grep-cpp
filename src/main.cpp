@@ -33,6 +33,20 @@ bool match_pattern(const std::string& input_line, const std::string& pattern)
         return false;
     }
     
+    // Handle positive character groups [abc]
+    if (pattern.length() >= 3 && pattern[0] == '[' && pattern[pattern.length() - 1] == ']') 
+    {
+        std::string chars = pattern.substr(1, pattern.length() - 2);
+        for (char c : input_line) 
+        {
+            if (chars.find(c) != std::string::npos)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    
     if (pattern.length() == 1) 
     {
         return input_line.find(pattern) != std::string::npos;
