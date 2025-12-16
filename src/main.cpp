@@ -41,18 +41,28 @@ bool match_char(char c, const std::string& pattern_element)
     return pattern_element.length() == 1 && c == pattern_element[0];
 }
 
-// Parse pattern into elements (handles \d, \w, [abc], [^abc], and literals)
-std::vector<std::string> parse_pattern(const std::string& pattern)
+// Structure to hold a pattern element and its quantifier
+struct PatternElement
 {
-    std::vector<std::string> elements;
+    std::string pattern;
+    char quantifier; // '\0' for none, '+' for one or more
+};
+
+// Parse pattern into elements (handles \d, \w, [abc], [^abc], literals, and + quantifier)
+std::vector<PatternElement> parse_pattern(const std::string& pattern)
+{
+    std::vector<PatternElement> elements;
     size_t i = 0;
     
     while (i < pattern.length())
     {
+        PatternElement elem;
+        elem.quantifier = '\0';
+        
         if (pattern[i] == '\\' && i + 1 < pattern.length())
         {
             // Escape sequence like \d or \w
-            elements.push_back(pattern.substr(i, 2));
+            elem.pattern = pattern.substr(i, 2);
             i += 2;
         }
         else if (pattern[i] == '[')
@@ -61,28 +71,38 @@ std::vector<std::string> parse_pattern(const std::string& pattern)
             size_t end = pattern.find(']', i);
             if (end != std::string::npos)
             {
-                elements.push_back(pattern.substr(i, end - i + 1));
+                elem.pattern = pattern.substr(i, end - i + 1);
                 i = end + 1;
             }
             else
             {
-                elements.push_back(pattern.substr(i, 1));
+                elem.pattern = pattern.substr(i, 1);
                 i++;
             }
         }
         else
         {
             // Literal character
-            elements.push_back(pattern.substr(i, 1));
+            elem.pattern = pattern.substr(i, 1);
             i++;
         }
+        
+        // Check for quantifier
+        if (i < pattern.length() && pattern[i] == '+')
+        {
+            elem.quantifier = '+';
+            i++;
+        }
+        
+        elements.push_back(elem);
     }
     
     return elements;
 }
 
 // Try to match pattern elements starting at a specific position in input
-bool match_at_position(const std::string& input, size_t start, const std::vector<std::string>& elements)
+// Returns the position after the match, or -1 if no match
+int match_at_position(const std::string& input, size_t start, const std::vector<PatternElement>& elements)
 {
     size_t input_pos = start;
     
@@ -90,18 +110,42 @@ bool match_at_position(const std::string& input, size_t start, const std::vector
     {
         if (input_pos >= input.length())
         {
-            return false;
+            return -1;
         }
         
-        if (!match_char(input[input_pos], element))
+        if (element.quantifier == '+')
         {
-            return false;
+            // One or more: must match at least once
+            if (!match_char(input[input_pos], element.pattern))
+            {
+                return -1;
+            }
+            input_pos++;
+            
+            // Greedy: match as many as possible
+            while (input_pos < input.length() && match_char(input[input_pos], element.pattern))
+            {
+                input_pos++;
+            }
         }
-        
-        input_pos++;
+        else
+        {
+            // No quantifier: match exactly once
+            if (!match_char(input[input_pos], element.pattern))
+            {
+                return -1;
+            }
+            input_pos++;
+        }
     }
     
-    return true;
+    return static_cast<int>(input_pos);
+}
+
+// Check if match succeeds at position (returns true/false)
+bool match_at_position_bool(const std::string& input, size_t start, const std::vector<PatternElement>& elements)
+{
+    return match_at_position(input, start, elements) != -1;
 }
 
 bool match_pattern(const std::string& input_line, const std::string& pattern) 
@@ -124,7 +168,7 @@ bool match_pattern(const std::string& input_line, const std::string& pattern)
         actual_pattern = actual_pattern.substr(0, actual_pattern.length() - 1);
     }
     
-    std::vector<std::string> elements = parse_pattern(actual_pattern);
+    std::vector<PatternElement> elements = parse_pattern(actual_pattern);
     
     if (elements.empty())
     {
@@ -134,32 +178,38 @@ bool match_pattern(const std::string& input_line, const std::string& pattern)
     // If anchored to start, only try matching at position 0
     if (anchor_start)
     {
+        int end_pos = match_at_position(input_line, 0, elements);
+        if (end_pos == -1)
+        {
+            return false;
+        }
         if (anchor_end)
         {
-            // Both anchors: pattern must match entire string
-            return elements.size() == input_line.length() && 
-                   match_at_position(input_line, 0, elements);
+            // Both anchors: match must consume entire string
+            return static_cast<size_t>(end_pos) == input_line.length();
         }
-        return match_at_position(input_line, 0, elements);
+        return true;
     }
     
     // If anchored to end, match must end at the last character
     if (anchor_end)
     {
-        // The match must end exactly at input_line.length()
-        // So we need to start at position (input_line.length() - elements.size())
-        if (input_line.length() < elements.size())
+        // Try matching from each position and check if it ends at the string end
+        for (size_t i = 0; i <= input_line.length(); i++)
         {
-            return false;
+            int end_pos = match_at_position(input_line, i, elements);
+            if (end_pos != -1 && static_cast<size_t>(end_pos) == input_line.length())
+            {
+                return true;
+            }
         }
-        size_t start_pos = input_line.length() - elements.size();
-        return match_at_position(input_line, start_pos, elements);
+        return false;
     }
     
     // Try matching at each position in the input
     for (size_t i = 0; i <= input_line.length(); i++)
     {
-        if (match_at_position(input_line, i, elements))
+        if (match_at_position_bool(input_line, i, elements))
         {
             return true;
         }
