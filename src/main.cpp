@@ -108,12 +108,20 @@ bool match_pattern(const std::string& input_line, const std::string& pattern)
 {
     std::string actual_pattern = pattern;
     bool anchor_start = false;
+    bool anchor_end = false;
     
     // Check for start anchor ^
-    if (!pattern.empty() && pattern[0] == '^')
+    if (!actual_pattern.empty() && actual_pattern[0] == '^')
     {
         anchor_start = true;
-        actual_pattern = pattern.substr(1);
+        actual_pattern = actual_pattern.substr(1);
+    }
+    
+    // Check for end anchor $
+    if (!actual_pattern.empty() && actual_pattern[actual_pattern.length() - 1] == '$')
+    {
+        anchor_end = true;
+        actual_pattern = actual_pattern.substr(0, actual_pattern.length() - 1);
     }
     
     std::vector<std::string> elements = parse_pattern(actual_pattern);
@@ -126,7 +134,26 @@ bool match_pattern(const std::string& input_line, const std::string& pattern)
     // If anchored to start, only try matching at position 0
     if (anchor_start)
     {
+        if (anchor_end)
+        {
+            // Both anchors: pattern must match entire string
+            return elements.size() == input_line.length() && 
+                   match_at_position(input_line, 0, elements);
+        }
         return match_at_position(input_line, 0, elements);
+    }
+    
+    // If anchored to end, match must end at the last character
+    if (anchor_end)
+    {
+        // The match must end exactly at input_line.length()
+        // So we need to start at position (input_line.length() - elements.size())
+        if (input_line.length() < elements.size())
+        {
+            return false;
+        }
+        size_t start_pos = input_line.length() - elements.size();
+        return match_at_position(input_line, start_pos, elements);
     }
     
     // Try matching at each position in the input
