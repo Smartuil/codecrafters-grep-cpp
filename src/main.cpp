@@ -100,46 +100,66 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern)
     return elements;
 }
 
-// Try to match pattern elements starting at a specific position in input
+// Try to match pattern elements starting at a specific position in input (with backtracking)
 // Returns the position after the match, or -1 if no match
-int match_at_position(const std::string& input, size_t start, const std::vector<PatternElement>& elements)
+int match_at_position(const std::string& input, size_t input_pos, 
+                      const std::vector<PatternElement>& elements, size_t elem_idx)
 {
-    size_t input_pos = start;
-    
-    for (const auto& element : elements)
+    // All elements matched successfully
+    if (elem_idx >= elements.size())
     {
-        if (input_pos >= input.length())
+        return static_cast<int>(input_pos);
+    }
+    
+    // No more input but still have elements to match
+    if (input_pos >= input.length())
+    {
+        return -1;
+    }
+    
+    const PatternElement& element = elements[elem_idx];
+    
+    if (element.quantifier == '+')
+    {
+        // One or more: must match at least once
+        if (!match_char(input[input_pos], element.pattern))
         {
             return -1;
         }
         
-        if (element.quantifier == '+')
+        // Greedy: find how many we can match
+        size_t max_pos = input_pos + 1;
+        while (max_pos < input.length() && match_char(input[max_pos], element.pattern))
         {
-            // One or more: must match at least once
-            if (!match_char(input[input_pos], element.pattern))
+            max_pos++;
+        }
+        
+        // Try from max matches down to 1 (greedy with backtracking)
+        for (size_t end = max_pos; end > input_pos; end--)
+        {
+            int result = match_at_position(input, end, elements, elem_idx + 1);
+            if (result != -1)
             {
-                return -1;
-            }
-            input_pos++;
-            
-            // Greedy: match as many as possible
-            while (input_pos < input.length() && match_char(input[input_pos], element.pattern))
-            {
-                input_pos++;
+                return result;
             }
         }
-        else
-        {
-            // No quantifier: match exactly once
-            if (!match_char(input[input_pos], element.pattern))
-            {
-                return -1;
-            }
-            input_pos++;
-        }
+        return -1;
     }
-    
-    return static_cast<int>(input_pos);
+    else
+    {
+        // No quantifier: match exactly once
+        if (!match_char(input[input_pos], element.pattern))
+        {
+            return -1;
+        }
+        return match_at_position(input, input_pos + 1, elements, elem_idx + 1);
+    }
+}
+
+// Wrapper function
+int match_at_position(const std::string& input, size_t start, const std::vector<PatternElement>& elements)
+{
+    return match_at_position(input, start, elements, 0);
 }
 
 // Check if match succeeds at position (returns true/false)
