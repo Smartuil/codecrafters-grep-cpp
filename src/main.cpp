@@ -1,75 +1,128 @@
 #include <iostream>
 #include <string>
+#include <vector>
 
-bool match_pattern(const std::string& input_line, const std::string& pattern) 
+// Check if a single character matches a pattern element
+bool match_char(char c, const std::string& pattern_element)
 {
-    // Handle \d character class - matches any digit
-    if (pattern == "\\d") 
+    if (pattern_element == "\\d")
     {
-        for (char c : input_line) 
-        {
-            if (c >= '0' && c <= '9')
-            {
-                return true;
-            }
-        }
-        return false;
+        return c >= '0' && c <= '9';
     }
     
-    // Handle \w character class - matches any word character (a-z, A-Z, 0-9, _)
-    if (pattern == "\\w") 
+    if (pattern_element == "\\w")
     {
-        for (char c : input_line) 
-        {
-            if ((c >= 'a' && c <= 'z') || 
-                (c >= 'A' && c <= 'Z') || 
-                (c >= '0' && c <= '9') || 
-                c == '_')
-            {
-                return true;
-            }
-        }
-        
-        return false;
+        return (c >= 'a' && c <= 'z') || 
+               (c >= 'A' && c <= 'Z') || 
+               (c >= '0' && c <= '9') || 
+               c == '_';
     }
     
-    // Handle positive character groups [abc]
-    if (pattern.length() >= 3 && pattern[0] == '[' && pattern[pattern.length() - 1] == ']') 
+    // Negative character group [^abc]
+    if (pattern_element.length() >= 4 && 
+        pattern_element[0] == '[' && 
+        pattern_element[1] == '^' && 
+        pattern_element[pattern_element.length() - 1] == ']')
     {
-        // Handle negative character groups [^abc]
-        if (pattern.length() >= 4 && pattern[1] == '^')
+        std::string chars = pattern_element.substr(2, pattern_element.length() - 3);
+        return chars.find(c) == std::string::npos;
+    }
+    
+    // Positive character group [abc]
+    if (pattern_element.length() >= 3 && 
+        pattern_element[0] == '[' && 
+        pattern_element[pattern_element.length() - 1] == ']')
+    {
+        std::string chars = pattern_element.substr(1, pattern_element.length() - 2);
+        return chars.find(c) != std::string::npos;
+    }
+    
+    // Literal character
+    return pattern_element.length() == 1 && c == pattern_element[0];
+}
+
+// Parse pattern into elements (handles \d, \w, [abc], [^abc], and literals)
+std::vector<std::string> parse_pattern(const std::string& pattern)
+{
+    std::vector<std::string> elements;
+    size_t i = 0;
+    
+    while (i < pattern.length())
+    {
+        if (pattern[i] == '\\' && i + 1 < pattern.length())
         {
-            std::string chars = pattern.substr(2, pattern.length() - 3);
-            for (char c : input_line) 
+            // Escape sequence like \d or \w
+            elements.push_back(pattern.substr(i, 2));
+            i += 2;
+        }
+        else if (pattern[i] == '[')
+        {
+            // Character group [abc] or [^abc]
+            size_t end = pattern.find(']', i);
+            if (end != std::string::npos)
             {
-                if (chars.find(c) == std::string::npos)
-                {
-                    return true;
-                }
+                elements.push_back(pattern.substr(i, end - i + 1));
+                i = end + 1;
             }
+            else
+            {
+                elements.push_back(pattern.substr(i, 1));
+                i++;
+            }
+        }
+        else
+        {
+            // Literal character
+            elements.push_back(pattern.substr(i, 1));
+            i++;
+        }
+    }
+    
+    return elements;
+}
+
+// Try to match pattern elements starting at a specific position in input
+bool match_at_position(const std::string& input, size_t start, const std::vector<std::string>& elements)
+{
+    size_t input_pos = start;
+    
+    for (const auto& element : elements)
+    {
+        if (input_pos >= input.length())
+        {
             return false;
         }
         
-        // Positive character group
-        std::string chars = pattern.substr(1, pattern.length() - 2);
-        for (char c : input_line) 
+        if (!match_char(input[input_pos], element))
         {
-            if (chars.find(c) != std::string::npos)
-            {
-                return true;
-            }
+            return false;
         }
-        return false;
+        
+        input_pos++;
     }
     
-    if (pattern.length() == 1) 
+    return true;
+}
+
+bool match_pattern(const std::string& input_line, const std::string& pattern) 
+{
+    std::vector<std::string> elements = parse_pattern(pattern);
+    
+    if (elements.empty())
     {
-        return input_line.find(pattern) != std::string::npos;
+        return true;
     }
-    else 
+    
+    // Try matching at each position in the input
+    for (size_t i = 0; i <= input_line.length(); i++)
     {
-        throw std::runtime_error("Unhandled pattern " + pattern);
+        if (match_at_position(input_line, i, elements))
+        {
+            return true;
+        }
     }
+    
+    return false;
 }
 
 int main(int argc, char* argv[]) 
