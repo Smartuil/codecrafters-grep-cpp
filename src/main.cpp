@@ -367,15 +367,32 @@ bool match_pattern(const std::string& input_line, const std::string& pattern)
     return start != -1;
 }
 
-// Extract matched substring (for -o flag)
-std::string match_pattern_extract(const std::string& input_line, const std::string& pattern) 
+// Extract all matched substrings (for -o flag with multiple matches)
+std::vector<std::string> match_pattern_extract_all(const std::string& input_line, const std::string& pattern) 
 {
-    auto [start, end] = match_pattern_core(input_line, pattern);
-    if (start == -1)
+    std::vector<std::string> matches;
+    size_t search_start = 0;
+    
+    while (search_start <= input_line.length())
     {
-        return "";
+        // Search in the remaining part of the string
+        std::string remaining = input_line.substr(search_start);
+        auto [start, end] = match_pattern_core(remaining, pattern);
+        
+        if (start == -1 || start == end)
+        {
+            // No more matches or empty match
+            break;
+        }
+        
+        matches.push_back(remaining.substr(start, end - start));
+        
+        // Move past this match to find the next one
+        // Advance by at least 1 to avoid infinite loop on zero-width matches
+        search_start += start + std::max(1, end - start);
     }
-    return input_line.substr(start, end - start);
+    
+    return matches;
 }
 
 int main(int argc, char* argv[]) 
@@ -440,8 +457,8 @@ int main(int argc, char* argv[])
         {
             if (only_matching)
             {
-                std::string match = match_pattern_extract(input_line, pattern);
-                if (!match.empty())
+                std::vector<std::string> matches = match_pattern_extract_all(input_line, pattern);
+                for (const std::string& match : matches)
                 {
                     std::cout << match << std::endl;
                     any_match = true;
