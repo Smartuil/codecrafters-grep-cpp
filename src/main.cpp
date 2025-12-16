@@ -45,7 +45,7 @@ bool match_char(char c, const std::string& pattern_element)
 struct PatternElement
 {
     std::string pattern;
-    char quantifier; // '\0' for none, '+' for one or more
+    char quantifier; // '\0' for none, '+' for one or more, '?' for zero or one
 };
 
 // Parse pattern into elements (handles \d, \w, [abc], [^abc], literals, and + quantifier)
@@ -88,9 +88,9 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern)
         }
         
         // Check for quantifier
-        if (i < pattern.length() && pattern[i] == '+')
+        if (i < pattern.length() && (pattern[i] == '+' || pattern[i] == '?'))
         {
-            elem.quantifier = '+';
+            elem.quantifier = pattern[i];
             i++;
         }
         
@@ -111,13 +111,18 @@ int match_at_position(const std::string& input, size_t input_pos,
         return static_cast<int>(input_pos);
     }
     
+    const PatternElement& element = elements[elem_idx];
+    
     // No more input but still have elements to match
     if (input_pos >= input.length())
     {
+        // Only ? quantifier can match zero characters
+        if (element.quantifier == '?')
+        {
+            return match_at_position(input, input_pos, elements, elem_idx + 1);
+        }
         return -1;
     }
-    
-    const PatternElement& element = elements[elem_idx];
     
     if (element.quantifier == '+')
     {
@@ -144,6 +149,21 @@ int match_at_position(const std::string& input, size_t input_pos,
             }
         }
         return -1;
+    }
+    else if (element.quantifier == '?')
+    {
+        // Zero or one: try matching one first (greedy), then zero
+        if (match_char(input[input_pos], element.pattern))
+        {
+            // Try matching one
+            int result = match_at_position(input, input_pos + 1, elements, elem_idx + 1);
+            if (result != -1)
+            {
+                return result;
+            }
+        }
+        // Try matching zero (skip this element)
+        return match_at_position(input, input_pos, elements, elem_idx + 1);
     }
     else
     {
