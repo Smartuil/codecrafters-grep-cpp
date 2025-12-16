@@ -391,6 +391,7 @@ int main(int argc, char* argv[])
     {
         if (match_pattern(input_line, pattern)) 
         {
+            std::cout << input_line << std::endl;
             return 0;
         } 
         else 
