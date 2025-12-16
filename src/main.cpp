@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <utility>
 
 // Check if a single character matches a pattern element
 bool match_char(char c, const std::string& pattern_element)
@@ -288,7 +289,9 @@ bool match_at_position_bool(const std::string& input, size_t start, const std::v
     return match_at_position(input, start, elements) != -1;
 }
 
-bool match_pattern(const std::string& input_line, const std::string& pattern) 
+// Core matching function that returns match info (start position and end position)
+// Returns {-1, -1} if no match
+std::pair<int, int> match_pattern_core(const std::string& input_line, const std::string& pattern) 
 {
     std::string actual_pattern = pattern;
     bool anchor_start = false;
@@ -312,7 +315,7 @@ bool match_pattern(const std::string& input_line, const std::string& pattern)
     
     if (elements.empty())
     {
-        return true;
+        return {0, 0};
     }
     
     // If anchored to start, only try matching at position 0
@@ -321,41 +324,58 @@ bool match_pattern(const std::string& input_line, const std::string& pattern)
         int end_pos = match_at_position(input_line, 0, elements);
         if (end_pos == -1)
         {
-            return false;
+            return {-1, -1};
         }
-        if (anchor_end)
+        if (anchor_end && static_cast<size_t>(end_pos) != input_line.length())
         {
-            // Both anchors: match must consume entire string
-            return static_cast<size_t>(end_pos) == input_line.length();
+            return {-1, -1};
         }
-        return true;
+        return {0, end_pos};
     }
     
     // If anchored to end, match must end at the last character
     if (anchor_end)
     {
-        // Try matching from each position and check if it ends at the string end
         for (size_t i = 0; i <= input_line.length(); i++)
         {
             int end_pos = match_at_position(input_line, i, elements);
             if (end_pos != -1 && static_cast<size_t>(end_pos) == input_line.length())
             {
-                return true;
+                return {static_cast<int>(i), end_pos};
             }
         }
-        return false;
+        return {-1, -1};
     }
     
     // Try matching at each position in the input
     for (size_t i = 0; i <= input_line.length(); i++)
     {
-        if (match_at_position_bool(input_line, i, elements))
+        int end_pos = match_at_position(input_line, i, elements);
+        if (end_pos != -1)
         {
-            return true;
+            return {static_cast<int>(i), end_pos};
         }
     }
     
-    return false;
+    return {-1, -1};
+}
+
+// Check if pattern matches (returns true/false)
+bool match_pattern(const std::string& input_line, const std::string& pattern) 
+{
+    auto [start, end] = match_pattern_core(input_line, pattern);
+    return start != -1;
+}
+
+// Extract matched substring (for -o flag)
+std::string match_pattern_extract(const std::string& input_line, const std::string& pattern) 
+{
+    auto [start, end] = match_pattern_core(input_line, pattern);
+    if (start == -1)
+    {
+        return "";
+    }
+    return input_line.substr(start, end - start);
 }
 
 int main(int argc, char* argv[]) 
@@ -367,23 +387,50 @@ int main(int argc, char* argv[])
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     std::cerr << "Logs from your program will appear here" << std::endl;
 
-    if (argc != 3) 
+    if (argc < 3) 
     {
-        std::cerr << "Expected two arguments" << std::endl;
+        std::cerr << "Expected at least two arguments" << std::endl;
         return 1;
     }
 
-    std::string flag = argv[1];
-    std::string pattern = argv[2];
-
-    if (flag != "-E") 
-    {
-        std::cerr << "Expected first argument to be '-E'" << std::endl;
-        return 1;
-    }
-
-    // TODO: Uncomment the code below to pass the first stage
+    bool only_matching = false;
+    std::string pattern;
     
+    // Parse arguments
+    int i = 1;
+    while (i < argc)
+    {
+        std::string arg = argv[i];
+        if (arg == "-o")
+        {
+            only_matching = true;
+            i++;
+        }
+        else if (arg == "-E")
+        {
+            if (i + 1 < argc)
+            {
+                pattern = argv[i + 1];
+                i += 2;
+            }
+            else
+            {
+                std::cerr << "Expected pattern after -E" << std::endl;
+                return 1;
+            }
+        }
+        else
+        {
+            i++;
+        }
+    }
+
+    if (pattern.empty())
+    {
+        std::cerr << "No pattern provided" << std::endl;
+        return 1;
+    }
+
     std::string input_line;
     bool any_match = false;
     
@@ -391,10 +438,22 @@ int main(int argc, char* argv[])
     {
         try 
         {
-            if (match_pattern(input_line, pattern)) 
+            if (only_matching)
             {
-                std::cout << input_line << std::endl;
-                any_match = true;
+                std::string match = match_pattern_extract(input_line, pattern);
+                if (!match.empty())
+                {
+                    std::cout << match << std::endl;
+                    any_match = true;
+                }
+            }
+            else
+            {
+                if (match_pattern(input_line, pattern)) 
+                {
+                    std::cout << input_line << std::endl;
+                    any_match = true;
+                }
             }
         } 
         catch (const std::runtime_error& e) 
