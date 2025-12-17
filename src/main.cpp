@@ -413,7 +413,7 @@ int main(int argc, char* argv[])
 
     bool only_matching = false;
     std::string pattern;
-    std::string filename;
+    std::vector<std::string> filenames;
     
     // Parse arguments
     int i = 1;
@@ -441,7 +441,7 @@ int main(int argc, char* argv[])
         else if (arg[0] != '-')
         {
             // Assume it's a filename
-            filename = arg;
+            filenames.push_back(arg);
             i++;
         }
         else
@@ -458,48 +458,62 @@ int main(int argc, char* argv[])
 
     std::string input_line;
     bool any_match = false;
+    bool multiple_files = filenames.size() > 1;
     
-    // Determine input source: file or stdin
-    std::ifstream file;
-    std::istream* input_stream = &std::cin;
-    
-    if (!filename.empty())
+    // Lambda to process a single line
+    auto process_line = [&](const std::string& line, const std::string& prefix) 
     {
-        file.open(filename);
-        if (!file.is_open())
+        if (only_matching)
         {
-            std::cerr << "Could not open file: " << filename << std::endl;
-            return 1;
+            std::vector<std::string> matches = match_pattern_extract_all(line, pattern);
+            for (const std::string& match : matches)
+            {
+                std::cout << prefix << match << std::endl;
+                any_match = true;
+            }
         }
-        input_stream = &file;
-    }
+        else
+        {
+            if (match_pattern(line, pattern)) 
+            {
+                std::cout << prefix << line << std::endl;
+                any_match = true;
+            }
+        }
+    };
     
-    while (std::getline(*input_stream, input_line))
+    // Lambda to process an input stream
+    auto process_stream = [&](std::istream& stream, const std::string& filename) 
     {
-        try 
+        std::string prefix = multiple_files ? filename + ":" : "";
+        while (std::getline(stream, input_line))
         {
-            if (only_matching)
+            try 
             {
-                std::vector<std::string> matches = match_pattern_extract_all(input_line, pattern);
-                for (const std::string& match : matches)
-                {
-                    std::cout << match << std::endl;
-                    any_match = true;
-                }
-            }
-            else
+                process_line(input_line, prefix);
+            } 
+            catch (const std::runtime_error& e) 
             {
-                if (match_pattern(input_line, pattern)) 
-                {
-                    std::cout << input_line << std::endl;
-                    any_match = true;
-                }
+                std::cerr << e.what() << std::endl;
             }
-        } 
-        catch (const std::runtime_error& e) 
+        }
+    };
+    
+    if (filenames.empty())
+    {
+        process_stream(std::cin, "");
+    }
+    else
+    {
+        for (const std::string& filename : filenames)
         {
-            std::cerr << e.what() << std::endl;
-            return 1;
+            std::ifstream file(filename);
+            if (!file.is_open())
+            {
+                std::cerr << "Could not open file: " << filename << std::endl;
+                continue;
+            }
+            process_stream(file, filename);
         }
     }
     
