@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <vector>
 #include <utility>
@@ -412,6 +413,7 @@ int main(int argc, char* argv[])
 
     bool only_matching = false;
     std::string pattern;
+    std::string filename;
     
     // Parse arguments
     int i = 1;
@@ -436,6 +438,12 @@ int main(int argc, char* argv[])
                 return 1;
             }
         }
+        else if (arg[0] != '-')
+        {
+            // Assume it's a filename
+            filename = arg;
+            i++;
+        }
         else
         {
             i++;
@@ -451,7 +459,22 @@ int main(int argc, char* argv[])
     std::string input_line;
     bool any_match = false;
     
-    while (std::getline(std::cin, input_line))
+    // Determine input source: file or stdin
+    std::ifstream file;
+    std::istream* input_stream = &std::cin;
+    
+    if (!filename.empty())
+    {
+        file.open(filename);
+        if (!file.is_open())
+        {
+            std::cerr << "Could not open file: " << filename << std::endl;
+            return 1;
+        }
+        input_stream = &file;
+    }
+    
+    while (std::getline(*input_stream, input_line))
     {
         try 
         {
