@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <filesystem>
 
 // Check if a single character matches a pattern element
 bool match_char(char c, const std::string& pattern_element)
@@ -412,8 +413,9 @@ int main(int argc, char* argv[])
     }
 
     bool only_matching = false;
+    bool recursive = false;
     std::string pattern;
-    std::vector<std::string> filenames;
+    std::vector<std::string> paths;
     
     // Parse arguments
     int i = 1;
@@ -423,6 +425,11 @@ int main(int argc, char* argv[])
         if (arg == "-o")
         {
             only_matching = true;
+            i++;
+        }
+        else if (arg == "-r")
+        {
+            recursive = true;
             i++;
         }
         else if (arg == "-E")
@@ -440,8 +447,7 @@ int main(int argc, char* argv[])
         }
         else if (arg[0] != '-')
         {
-            // Assume it's a filename
-            filenames.push_back(arg);
+            paths.push_back(arg);
             i++;
         }
         else
@@ -456,9 +462,31 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    // Collect all files to search
+    std::vector<std::string> filenames;
+    
+    for (const std::string& path : paths)
+    {
+        if (recursive && std::filesystem::is_directory(path))
+        {
+            // Recursively collect all files in directory
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(path))
+            {
+                if (entry.is_regular_file())
+                {
+                    filenames.push_back(entry.path().string());
+                }
+            }
+        }
+        else
+        {
+            filenames.push_back(path);
+        }
+    }
+
     std::string input_line;
     bool any_match = false;
-    bool multiple_files = filenames.size() > 1;
+    bool multiple_files = filenames.size() > 1 || recursive;
     
     // Lambda to process a single line
     auto process_line = [&](const std::string& line, const std::string& prefix) 
