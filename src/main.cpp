@@ -304,8 +304,8 @@ int match_alternation(const std::string& input, size_t input_pos,
     // Try each alternative
     for (const std::string& alt : element.alternatives)
     {
-        // Parse the alternative as its own pattern with correct starting group number
-        std::vector<PatternElement> alt_elements = parse_pattern(alt, false, element.nested_group_start);
+        // Parse the alternative as its own pattern - nested groups start from this group's number
+        std::vector<PatternElement> alt_elements = parse_pattern(alt, false, element.group_number);
         
         // Try to match the alternative
         int alt_end = match_at_position(input, input_pos, alt_elements, 0);
@@ -368,8 +368,9 @@ int match_at_position(const std::string& input, size_t input_pos,
     // Handle capturing group (without alternation)
     if (element.is_capturing_group)
     {
-        // Parse the group content with the correct starting group number
-        std::vector<PatternElement> group_elements = parse_pattern(element.group_content, false, element.nested_group_start);
+        // Parse the group content - nested groups start from this group's number
+        // (so they get numbers group_number+1, group_number+2, etc.)
+        std::vector<PatternElement> group_elements = parse_pattern(element.group_content, false, element.group_number);
         
         // Try to match the group content
         int group_end = match_at_position(input, input_pos, group_elements, 0);
@@ -378,7 +379,7 @@ int match_at_position(const std::string& input, size_t input_pos,
             return -1;
         }
         
-        // Capture the matched text
+        // Capture the matched text for this group
         if (element.group_number > 0 && element.group_number < 10)
         {
             g_captured_groups[element.group_number] = input.substr(input_pos, group_end - input_pos);
