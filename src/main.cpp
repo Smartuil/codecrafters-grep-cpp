@@ -54,12 +54,13 @@ bool match_char(char c, const std::string& pattern_element)
 struct PatternElement
 {
     std::string pattern;
-    char quantifier; // '\0' for none, '+' for one or more, '?' for zero or one, '*' for zero or more, '{' for exact count
+    char quantifier; // '\0' for none, '+' for one or more, '?' for zero or one, '*' for zero or more, '{' for {n} or {n,}
     int exact_count; // used when quantifier is '{' for {n}
+    int min_count;   // used for {n,} - minimum count, -1 if not {n,} type
     bool is_alternation; // true if this is an alternation group (a|b|c)
     std::vector<std::string> alternatives; // list of alternatives for alternation
     
-    PatternElement() : quantifier('\0'), exact_count(0), is_alternation(false) {}
+    PatternElement() : quantifier('\0'), exact_count(0), min_count(-1), is_alternation(false) {}
 };
 
 // Parse pattern into elements (handles \d, \w, [abc], [^abc], (a|b), literals, and quantifiers)
@@ -136,13 +137,26 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern)
         }
         else if (i < pattern.length() && pattern[i] == '{')
         {
-            // Parse {n} quantifier
+            // Parse {n} or {n,} quantifier
             size_t close_brace = pattern.find('}', i);
             if (close_brace != std::string::npos)
             {
-                std::string num_str = pattern.substr(i + 1, close_brace - i - 1);
+                std::string content = pattern.substr(i + 1, close_brace - i - 1);
                 elem.quantifier = '{';
-                elem.exact_count = std::stoi(num_str);
+                
+                // Check if it's {n,} format
+                size_t comma_pos = content.find(',');
+                if (comma_pos != std::string::npos && comma_pos == content.length() - 1)
+                {
+                    // {n,} format - at least n times
+                    elem.min_count = std::stoi(content.substr(0, comma_pos));
+                    elem.exact_count = -1; // indicates {n,} type
+                }
+                else
+                {
+                    // {n} format - exactly n times
+                    elem.exact_count = std::stoi(content);
+                }
                 i = close_brace + 1;
             }
         }
@@ -310,26 +324,66 @@ int match_at_position(const std::string& input, size_t input_pos,
     }
     else if (element.quantifier == '{')
     {
-        // Exact count: must match exactly n times
-        int n = element.exact_count;
-        
-        // Check if we have enough characters left
-        if (input_pos + n > input.length())
+        if (element.min_count >= 0)
         {
-            return -1;
-        }
-        
-        // Match exactly n characters
-        for (int j = 0; j < n; j++)
-        {
-            if (!match_char(input[input_pos + j], element.pattern))
+            // {n,} format: at least n times (greedy with backtracking)
+            int n = element.min_count;
+            
+            // First, must match at least n times
+            if (input_pos + n > input.length())
             {
                 return -1;
             }
+            
+            for (int j = 0; j < n; j++)
+            {
+                if (!match_char(input[input_pos + j], element.pattern))
+                {
+                    return -1;
+                }
+            }
+            
+            // Greedy: find how many more we can match beyond n
+            size_t max_pos = input_pos + n;
+            while (max_pos < input.length() && match_char(input[max_pos], element.pattern))
+            {
+                max_pos++;
+            }
+            
+            // Try from max matches down to n (greedy with backtracking)
+            for (size_t end = max_pos; end >= input_pos + n; end--)
+            {
+                int result = match_at_position(input, end, elements, elem_idx + 1);
+                if (result != -1)
+                {
+                    return result;
+                }
+            }
+            return -1;
         }
-        
-        // All n characters matched, continue with next element
-        return match_at_position(input, input_pos + n, elements, elem_idx + 1);
+        else
+        {
+            // {n} format: exact count, must match exactly n times
+            int n = element.exact_count;
+            
+            // Check if we have enough characters left
+            if (input_pos + n > input.length())
+            {
+                return -1;
+            }
+            
+            // Match exactly n characters
+            for (int j = 0; j < n; j++)
+            {
+                if (!match_char(input[input_pos + j], element.pattern))
+                {
+                    return -1;
+                }
+            }
+            
+            // All n characters matched, continue with next element
+            return match_at_position(input, input_pos + n, elements, elem_idx + 1);
+        }
     }
     else
     {
