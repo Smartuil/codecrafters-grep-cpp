@@ -54,11 +54,12 @@ bool match_char(char c, const std::string& pattern_element)
 struct PatternElement
 {
     std::string pattern;
-    char quantifier; // '\0' for none, '+' for one or more, '?' for zero or one, '*' for zero or more
+    char quantifier; // '\0' for none, '+' for one or more, '?' for zero or one, '*' for zero or more, '{' for exact count
+    int exact_count; // used when quantifier is '{' for {n}
     bool is_alternation; // true if this is an alternation group (a|b|c)
     std::vector<std::string> alternatives; // list of alternatives for alternation
     
-    PatternElement() : quantifier('\0'), is_alternation(false) {}
+    PatternElement() : quantifier('\0'), exact_count(0), is_alternation(false) {}
 };
 
 // Parse pattern into elements (handles \d, \w, [abc], [^abc], (a|b), literals, and quantifiers)
@@ -132,6 +133,18 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern)
         {
             elem.quantifier = pattern[i];
             i++;
+        }
+        else if (i < pattern.length() && pattern[i] == '{')
+        {
+            // Parse {n} quantifier
+            size_t close_brace = pattern.find('}', i);
+            if (close_brace != std::string::npos)
+            {
+                std::string num_str = pattern.substr(i + 1, close_brace - i - 1);
+                elem.quantifier = '{';
+                elem.exact_count = std::stoi(num_str);
+                i = close_brace + 1;
+            }
         }
         
         elements.push_back(elem);
@@ -220,7 +233,9 @@ int match_at_position(const std::string& input, size_t input_pos,
     if (input_pos >= input.length())
     {
         // ? and * quantifiers can match zero characters
-        if (element.quantifier == '?' || element.quantifier == '*')
+        // {0} can also match zero characters
+        if (element.quantifier == '?' || element.quantifier == '*' || 
+            (element.quantifier == '{' && element.exact_count == 0))
         {
             return match_at_position(input, input_pos, elements, elem_idx + 1);
         }
@@ -292,6 +307,29 @@ int match_at_position(const std::string& input, size_t input_pos,
         }
         // Try matching zero (skip this element)
         return match_at_position(input, input_pos, elements, elem_idx + 1);
+    }
+    else if (element.quantifier == '{')
+    {
+        // Exact count: must match exactly n times
+        int n = element.exact_count;
+        
+        // Check if we have enough characters left
+        if (input_pos + n > input.length())
+        {
+            return -1;
+        }
+        
+        // Match exactly n characters
+        for (int j = 0; j < n; j++)
+        {
+            if (!match_char(input[input_pos + j], element.pattern))
+            {
+                return -1;
+            }
+        }
+        
+        // All n characters matched, continue with next element
+        return match_at_position(input, input_pos + n, elements, elem_idx + 1);
     }
     else
     {
