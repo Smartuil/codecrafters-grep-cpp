@@ -861,14 +861,33 @@ int main(int argc, char* argv[])
             {
                 if (color_output)
                 {
-                    // Output with highlighting: before + highlighted match + after
-                    std::cout << prefix 
-                              << line.substr(0, start) 
-                              << COLOR_START 
-                              << line.substr(start, end - start) 
-                              << COLOR_END 
-                              << line.substr(end) 
-                              << std::endl;
+                    // Find and highlight all matches
+                    std::string result;
+                    size_t search_start = 0;
+                    
+                    while (search_start <= line.length())
+                    {
+                        std::string remaining = line.substr(search_start);
+                        auto [match_start, match_end] = match_pattern_core(remaining, pattern);
+                        
+                        if (match_start == -1 || match_start == match_end)
+                        {
+                            // No more matches, append the rest
+                            result += remaining;
+                            break;
+                        }
+                        
+                        // Append text before match + highlighted match
+                        result += remaining.substr(0, match_start);
+                        result += COLOR_START;
+                        result += remaining.substr(match_start, match_end - match_start);
+                        result += COLOR_END;
+                        
+                        // Move past this match
+                        search_start += match_start + std::max(1, match_end - match_start);
+                    }
+                    
+                    std::cout << prefix << result << std::endl;
                 }
                 else
                 {
