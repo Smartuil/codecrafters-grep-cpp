@@ -5,6 +5,14 @@
 #include <utility>
 #include <filesystem>
 
+#ifdef _WIN32
+#include <io.h>
+#define isatty _isatty
+#define fileno _fileno
+#else
+#include <unistd.h>
+#endif
+
 // Check if a single character matches a pattern element
 bool match_char(char c, const std::string& pattern_element)
 {
@@ -782,6 +790,12 @@ int main(int argc, char* argv[])
         else if (arg == "--color=never")
         {
             color_output = false;
+            i++;
+        }
+        else if (arg == "--color=auto")
+        {
+            // Enable color only if stdout is a TTY
+            color_output = isatty(fileno(stdout)) != 0;
             i++;
         }
         else if (arg == "-E")
