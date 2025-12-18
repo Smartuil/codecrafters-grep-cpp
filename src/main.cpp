@@ -54,7 +54,7 @@ bool match_char(char c, const std::string& pattern_element)
 struct PatternElement
 {
     std::string pattern;
-    char quantifier; // '\0' for none, '+' for one or more, '?' for zero or one
+    char quantifier; // '\0' for none, '+' for one or more, '?' for zero or one, '*' for zero or more
     bool is_alternation; // true if this is an alternation group (a|b|c)
     std::vector<std::string> alternatives; // list of alternatives for alternation
     
@@ -128,7 +128,7 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern)
         }
         
         // Check for quantifier
-        if (i < pattern.length() && (pattern[i] == '+' || pattern[i] == '?'))
+        if (i < pattern.length() && (pattern[i] == '+' || pattern[i] == '?' || pattern[i] == '*'))
         {
             elem.quantifier = pattern[i];
             i++;
@@ -219,8 +219,8 @@ int match_at_position(const std::string& input, size_t input_pos,
     // No more input but still have elements to match
     if (input_pos >= input.length())
     {
-        // Only ? quantifier can match zero characters
-        if (element.quantifier == '?')
+        // ? and * quantifiers can match zero characters
+        if (element.quantifier == '?' || element.quantifier == '*')
         {
             return match_at_position(input, input_pos, elements, elem_idx + 1);
         }
@@ -249,6 +249,31 @@ int match_at_position(const std::string& input, size_t input_pos,
             if (result != -1)
             {
                 return result;
+            }
+        }
+        return -1;
+    }
+    else if (element.quantifier == '*')
+    {
+        // Zero or more: greedy matching with backtracking
+        // Find how many we can match
+        size_t max_pos = input_pos;
+        while (max_pos < input.length() && match_char(input[max_pos], element.pattern))
+        {
+            max_pos++;
+        }
+        
+        // Try from max matches down to 0 (greedy with backtracking)
+        for (size_t end = max_pos; ; end--)
+        {
+            int result = match_at_position(input, end, elements, elem_idx + 1);
+            if (result != -1)
+            {
+                return result;
+            }
+            if (end == input_pos)
+            {
+                break;
             }
         }
         return -1;
