@@ -54,13 +54,14 @@ bool match_char(char c, const std::string& pattern_element)
 struct PatternElement
 {
     std::string pattern;
-    char quantifier; // '\0' for none, '+' for one or more, '?' for zero or one, '*' for zero or more, '{' for {n} or {n,}
+    char quantifier; // '\0' for none, '+' for one or more, '?' for zero or one, '*' for zero or more, '{' for {n}, {n,}, or {n,m}
     int exact_count; // used when quantifier is '{' for {n}
-    int min_count;   // used for {n,} - minimum count, -1 if not {n,} type
+    int min_count;   // used for {n,} and {n,m} - minimum count, -1 if not applicable
+    int max_count;   // used for {n,m} - maximum count, -1 if no upper limit ({n,})
     bool is_alternation; // true if this is an alternation group (a|b|c)
     std::vector<std::string> alternatives; // list of alternatives for alternation
     
-    PatternElement() : quantifier('\0'), exact_count(0), min_count(-1), is_alternation(false) {}
+    PatternElement() : quantifier('\0'), exact_count(0), min_count(-1), max_count(-1), is_alternation(false) {}
 };
 
 // Parse pattern into elements (handles \d, \w, [abc], [^abc], (a|b), literals, and quantifiers)
@@ -137,20 +138,30 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern)
         }
         else if (i < pattern.length() && pattern[i] == '{')
         {
-            // Parse {n} or {n,} quantifier
+            // Parse {n}, {n,}, or {n,m} quantifier
             size_t close_brace = pattern.find('}', i);
             if (close_brace != std::string::npos)
             {
                 std::string content = pattern.substr(i + 1, close_brace - i - 1);
                 elem.quantifier = '{';
                 
-                // Check if it's {n,} format
                 size_t comma_pos = content.find(',');
-                if (comma_pos != std::string::npos && comma_pos == content.length() - 1)
+                if (comma_pos != std::string::npos)
                 {
-                    // {n,} format - at least n times
-                    elem.min_count = std::stoi(content.substr(0, comma_pos));
-                    elem.exact_count = -1; // indicates {n,} type
+                    if (comma_pos == content.length() - 1)
+                    {
+                        // {n,} format - at least n times, no upper limit
+                        elem.min_count = std::stoi(content.substr(0, comma_pos));
+                        elem.max_count = -1; // no upper limit
+                        elem.exact_count = -1;
+                    }
+                    else
+                    {
+                        // {n,m} format - between n and m times
+                        elem.min_count = std::stoi(content.substr(0, comma_pos));
+                        elem.max_count = std::stoi(content.substr(comma_pos + 1));
+                        elem.exact_count = -1;
+                    }
                 }
                 else
                 {
@@ -326,8 +337,9 @@ int match_at_position(const std::string& input, size_t input_pos,
     {
         if (element.min_count >= 0)
         {
-            // {n,} format: at least n times (greedy with backtracking)
+            // {n,} or {n,m} format
             int n = element.min_count;
+            int m = element.max_count; // -1 means no upper limit
             
             // First, must match at least n times
             if (input_pos + n > input.length())
@@ -347,6 +359,11 @@ int match_at_position(const std::string& input, size_t input_pos,
             size_t max_pos = input_pos + n;
             while (max_pos < input.length() && match_char(input[max_pos], element.pattern))
             {
+                // If we have an upper limit, stop at m
+                if (m >= 0 && max_pos >= input_pos + static_cast<size_t>(m))
+                {
+                    break;
+                }
                 max_pos++;
             }
             
