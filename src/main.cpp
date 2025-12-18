@@ -4,7 +4,6 @@
 #include <vector>
 #include <utility>
 #include <filesystem>
-#include <algorithm>
 
 // Check if a single character matches a pattern element
 bool match_char(char c, const std::string& pattern_element)
@@ -329,10 +328,6 @@ int match_alternation(const std::string& input, size_t input_pos,
     return -1;
 }
 
-// Forward declaration for collecting all possible match end positions
-std::vector<int> collect_all_matches(const std::string& input, size_t input_pos,
-                                     const std::vector<PatternElement>& elements, size_t elem_idx);
-
 // Try to match pattern elements starting at a specific position in input (with backtracking)
 // Returns the position after the match, or -1 if no match
 int match_at_position(const std::string& input, size_t input_pos, 
@@ -376,36 +371,21 @@ int match_at_position(const std::string& input, size_t input_pos,
         // Parse the group content with the correct starting group number
         std::vector<PatternElement> group_elements = parse_pattern(element.group_content, false, element.nested_group_start);
         
-        // Collect all possible match end positions for the group content
-        std::vector<int> possible_ends = collect_all_matches(input, input_pos, group_elements, 0);
-        
-        // Try each possible end position from longest to shortest (greedy with backtracking)
-        // Sort in descending order for greedy matching
-        std::sort(possible_ends.begin(), possible_ends.end(), std::greater<int>());
-        
-        for (int group_end : possible_ends)
+        // Try to match the group content
+        int group_end = match_at_position(input, input_pos, group_elements, 0);
+        if (group_end == -1)
         {
-            // Save current captured groups state for backtracking
-            std::vector<std::string> saved_groups = g_captured_groups;
-            
-            // Capture the matched text
-            if (element.group_number > 0 && element.group_number < 10)
-            {
-                g_captured_groups[element.group_number] = input.substr(input_pos, group_end - input_pos);
-            }
-            
-            // Try to match the rest of the pattern
-            int result = match_at_position(input, group_end, elements, elem_idx + 1);
-            if (result != -1)
-            {
-                return result;
-            }
-            
-            // Restore captured groups for backtracking
-            g_captured_groups = saved_groups;
+            return -1;
         }
         
-        return -1;
+        // Capture the matched text
+        if (element.group_number > 0 && element.group_number < 10)
+        {
+            g_captured_groups[element.group_number] = input.substr(input_pos, group_end - input_pos);
+        }
+        
+        // Continue matching the rest of the pattern
+        return match_at_position(input, group_end, elements, elem_idx + 1);
     }
     
     // Handle alternation group
@@ -596,231 +576,6 @@ int match_at_position(const std::string& input, size_t input_pos,
             return -1;
         }
         return match_at_position(input, input_pos + 1, elements, elem_idx + 1);
-    }
-}
-
-// Collect all possible match end positions for a pattern starting at input_pos
-// This is used for backtracking in capturing groups
-std::vector<int> collect_all_matches(const std::string& input, size_t input_pos,
-                                     const std::vector<PatternElement>& elements, size_t elem_idx)
-{
-    std::vector<int> results;
-    
-    // All elements matched successfully
-    if (elem_idx >= elements.size())
-    {
-        results.push_back(static_cast<int>(input_pos));
-        return results;
-    }
-    
-    const PatternElement& element = elements[elem_idx];
-    
-    // Handle backreference
-    if (element.backreference > 0)
-    {
-        const std::string& captured = g_captured_groups[element.backreference];
-        if (captured.empty())
-        {
-            return results;
-        }
-        
-        if (input_pos + captured.length() > input.length())
-        {
-            return results;
-        }
-        
-        if (input.substr(input_pos, captured.length()) != captured)
-        {
-            return results;
-        }
-        
-        return collect_all_matches(input, input_pos + captured.length(), elements, elem_idx + 1);
-    }
-    
-    // Handle capturing group (without alternation)
-    if (element.is_capturing_group)
-    {
-        std::vector<PatternElement> group_elements = parse_pattern(element.group_content, false, element.nested_group_start);
-        std::vector<int> possible_ends = collect_all_matches(input, input_pos, group_elements, 0);
-        
-        for (int group_end : possible_ends)
-        {
-            // Save and set captured group
-            std::string saved = g_captured_groups[element.group_number];
-            if (element.group_number > 0 && element.group_number < 10)
-            {
-                g_captured_groups[element.group_number] = input.substr(input_pos, group_end - input_pos);
-            }
-            
-            std::vector<int> rest_results = collect_all_matches(input, group_end, elements, elem_idx + 1);
-            results.insert(results.end(), rest_results.begin(), rest_results.end());
-            
-            // Restore captured group
-            if (element.group_number > 0 && element.group_number < 10)
-            {
-                g_captured_groups[element.group_number] = saved;
-            }
-        }
-        return results;
-    }
-    
-    // Handle alternation group
-    if (element.is_alternation)
-    {
-        for (const std::string& alt : element.alternatives)
-        {
-            std::vector<PatternElement> alt_elements = parse_pattern(alt, false, element.nested_group_start);
-            std::vector<int> alt_ends = collect_all_matches(input, input_pos, alt_elements, 0);
-            
-            for (int alt_end : alt_ends)
-            {
-                std::string saved = g_captured_groups[element.group_number];
-                if (element.group_number > 0 && element.group_number < 10)
-                {
-                    g_captured_groups[element.group_number] = input.substr(input_pos, alt_end - input_pos);
-                }
-                
-                std::vector<int> rest_results = collect_all_matches(input, alt_end, elements, elem_idx + 1);
-                results.insert(results.end(), rest_results.begin(), rest_results.end());
-                
-                if (element.group_number > 0 && element.group_number < 10)
-                {
-                    g_captured_groups[element.group_number] = saved;
-                }
-            }
-        }
-        return results;
-    }
-    
-    // No more input but still have elements to match
-    if (input_pos >= input.length())
-    {
-        if (element.quantifier == '?' || element.quantifier == '*' || 
-            (element.quantifier == '{' && element.exact_count == 0))
-        {
-            return collect_all_matches(input, input_pos, elements, elem_idx + 1);
-        }
-        return results;
-    }
-    
-    if (element.quantifier == '+')
-    {
-        // One or more: must match at least once
-        if (!match_char(input[input_pos], element.pattern))
-        {
-            return results;
-        }
-        
-        // Find all possible match lengths (from 1 to max)
-        size_t max_pos = input_pos + 1;
-        while (max_pos < input.length() && match_char(input[max_pos], element.pattern))
-        {
-            max_pos++;
-        }
-        
-        // Collect results for each possible length
-        for (size_t end = input_pos + 1; end <= max_pos; end++)
-        {
-            std::vector<int> rest_results = collect_all_matches(input, end, elements, elem_idx + 1);
-            results.insert(results.end(), rest_results.begin(), rest_results.end());
-        }
-        return results;
-    }
-    else if (element.quantifier == '*')
-    {
-        // Zero or more
-        size_t max_pos = input_pos;
-        while (max_pos < input.length() && match_char(input[max_pos], element.pattern))
-        {
-            max_pos++;
-        }
-        
-        for (size_t end = input_pos; end <= max_pos; end++)
-        {
-            std::vector<int> rest_results = collect_all_matches(input, end, elements, elem_idx + 1);
-            results.insert(results.end(), rest_results.begin(), rest_results.end());
-        }
-        return results;
-    }
-    else if (element.quantifier == '?')
-    {
-        // Zero or one
-        // Try matching one
-        if (match_char(input[input_pos], element.pattern))
-        {
-            std::vector<int> rest_results = collect_all_matches(input, input_pos + 1, elements, elem_idx + 1);
-            results.insert(results.end(), rest_results.begin(), rest_results.end());
-        }
-        // Try matching zero
-        std::vector<int> rest_results = collect_all_matches(input, input_pos, elements, elem_idx + 1);
-        results.insert(results.end(), rest_results.begin(), rest_results.end());
-        return results;
-    }
-    else if (element.quantifier == '{')
-    {
-        if (element.min_count >= 0)
-        {
-            int n = element.min_count;
-            int m = element.max_count;
-            
-            if (input_pos + n > input.length())
-            {
-                return results;
-            }
-            
-            for (int j = 0; j < n; j++)
-            {
-                if (!match_char(input[input_pos + j], element.pattern))
-                {
-                    return results;
-                }
-            }
-            
-            size_t max_pos = input_pos + n;
-            while (max_pos < input.length() && match_char(input[max_pos], element.pattern))
-            {
-                if (m >= 0 && max_pos >= input_pos + static_cast<size_t>(m))
-                {
-                    break;
-                }
-                max_pos++;
-            }
-            
-            for (size_t end = input_pos + n; end <= max_pos; end++)
-            {
-                std::vector<int> rest_results = collect_all_matches(input, end, elements, elem_idx + 1);
-                results.insert(results.end(), rest_results.begin(), rest_results.end());
-            }
-            return results;
-        }
-        else
-        {
-            int n = element.exact_count;
-            
-            if (input_pos + n > input.length())
-            {
-                return results;
-            }
-            
-            for (int j = 0; j < n; j++)
-            {
-                if (!match_char(input[input_pos + j], element.pattern))
-                {
-                    return results;
-                }
-            }
-            
-            return collect_all_matches(input, input_pos + n, elements, elem_idx + 1);
-        }
-    }
-    else
-    {
-        // No quantifier: match exactly once
-        if (!match_char(input[input_pos], element.pattern))
-        {
-            return results;
-        }
-        return collect_all_matches(input, input_pos + 1, elements, elem_idx + 1);
     }
 }
 
