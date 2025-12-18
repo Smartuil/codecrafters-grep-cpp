@@ -751,8 +751,13 @@ int main(int argc, char* argv[])
 
     bool only_matching = false;
     bool recursive = false;
+    bool color_output = false;
     std::string pattern;
     std::vector<std::string> paths;
+    
+    // ANSI escape sequences for highlighting
+    const std::string COLOR_START = "\033[01;31m";
+    const std::string COLOR_END = "\033[m";
     
     // Parse arguments
     int i = 1;
@@ -767,6 +772,11 @@ int main(int argc, char* argv[])
         else if (arg == "-r")
         {
             recursive = true;
+            i++;
+        }
+        else if (arg == "--color=always" || arg == "--color")
+        {
+            color_output = true;
             i++;
         }
         else if (arg == "-E")
@@ -833,15 +843,37 @@ int main(int argc, char* argv[])
             std::vector<std::string> matches = match_pattern_extract_all(line, pattern);
             for (const std::string& match : matches)
             {
-                std::cout << prefix << match << std::endl;
+                if (color_output)
+                {
+                    std::cout << prefix << COLOR_START << match << COLOR_END << std::endl;
+                }
+                else
+                {
+                    std::cout << prefix << match << std::endl;
+                }
                 any_match = true;
             }
         }
         else
         {
-            if (match_pattern(line, pattern)) 
+            auto [start, end] = match_pattern_core(line, pattern);
+            if (start != -1) 
             {
-                std::cout << prefix << line << std::endl;
+                if (color_output)
+                {
+                    // Output with highlighting: before + highlighted match + after
+                    std::cout << prefix 
+                              << line.substr(0, start) 
+                              << COLOR_START 
+                              << line.substr(start, end - start) 
+                              << COLOR_END 
+                              << line.substr(end) 
+                              << std::endl;
+                }
+                else
+                {
+                    std::cout << prefix << line << std::endl;
+                }
                 any_match = true;
             }
         }
