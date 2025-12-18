@@ -62,12 +62,11 @@ struct PatternElement
     bool is_capturing_group; // true if this is a capturing group (without |)
     int group_number; // group number for capturing groups (1-based)
     int backreference; // backreference number (1-based), 0 if not a backreference
-    int nested_group_start; // starting group number for nested groups inside this group
     std::vector<std::string> alternatives; // list of alternatives for alternation
     std::string group_content; // content inside capturing group
     
     PatternElement() : quantifier('\0'), exact_count(0), min_count(-1), max_count(-1), 
-                       is_alternation(false), is_capturing_group(false), group_number(0), backreference(0), nested_group_start(0) {}
+                       is_alternation(false), is_capturing_group(false), group_number(0), backreference(0) {}
 };
 
 // Global counter for group numbers during parsing
@@ -151,9 +150,6 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern, bool reset
                 std::string group_content = pattern.substr(i + 1, end - i - 1);
                 elem.pattern = pattern.substr(i, end - i + 1);
                 elem.group_number = this_group_number;
-                
-                // Store the starting group number for nested groups
-                elem.nested_group_start = this_group_number;
                 
                 // Count nested groups to advance the counter properly
                 // This ensures nested groups get sequential numbers
