@@ -779,6 +779,11 @@ int main(int argc, char* argv[])
             color_output = true;
             i++;
         }
+        else if (arg == "--color=never")
+        {
+            color_output = false;
+            i++;
+        }
         else if (arg == "-E")
         {
             if (i + 1 < argc)
