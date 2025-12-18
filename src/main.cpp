@@ -62,22 +62,27 @@ struct PatternElement
     bool is_capturing_group; // true if this is a capturing group (without |)
     int group_number; // group number for capturing groups (1-based)
     int backreference; // backreference number (1-based), 0 if not a backreference
+    int nested_group_start; // starting group number for nested groups inside this group
     std::vector<std::string> alternatives; // list of alternatives for alternation
     std::string group_content; // content inside capturing group
     
     PatternElement() : quantifier('\0'), exact_count(0), min_count(-1), max_count(-1), 
-                       is_alternation(false), is_capturing_group(false), group_number(0), backreference(0) {}
+                       is_alternation(false), is_capturing_group(false), group_number(0), backreference(0), nested_group_start(0) {}
 };
 
 // Global counter for group numbers during parsing
 static int g_group_counter = 0;
 
 // Parse pattern into elements (handles \d, \w, [abc], [^abc], (a|b), capturing groups, backreferences, literals, and quantifiers)
-std::vector<PatternElement> parse_pattern(const std::string& pattern, bool reset_counter = true)
+std::vector<PatternElement> parse_pattern(const std::string& pattern, bool reset_counter = true, int start_group = 0)
 {
     if (reset_counter)
     {
         g_group_counter = 0;
+    }
+    else if (start_group > 0)
+    {
+        g_group_counter = start_group;
     }
     
     std::vector<PatternElement> elements;
@@ -121,11 +126,20 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern, bool reset
         }
         else if (pattern[i] == '(')
         {
+            // Assign group number immediately when we see '(' (left-to-right order)
+            g_group_counter++;
+            int this_group_number = g_group_counter;
+            
             // Find matching closing parenthesis (handle nested parens)
             int depth = 1;
             size_t end = i + 1;
             while (end < pattern.length() && depth > 0)
             {
+                if (pattern[end] == '\\' && end + 1 < pattern.length())
+                {
+                    end += 2; // Skip escaped characters
+                    continue;
+                }
                 if (pattern[end] == '(') depth++;
                 else if (pattern[end] == ')') depth--;
                 end++;
@@ -136,16 +150,37 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern, bool reset
             {
                 std::string group_content = pattern.substr(i + 1, end - i - 1);
                 elem.pattern = pattern.substr(i, end - i + 1);
+                elem.group_number = this_group_number;
                 
-                // Assign group number
-                g_group_counter++;
-                elem.group_number = g_group_counter;
+                // Store the starting group number for nested groups
+                elem.nested_group_start = this_group_number;
+                
+                // Count nested groups to advance the counter properly
+                // This ensures nested groups get sequential numbers
+                for (size_t j = 0; j < group_content.length(); j++)
+                {
+                    if (group_content[j] == '\\' && j + 1 < group_content.length())
+                    {
+                        j++; // Skip escaped character
+                        continue;
+                    }
+                    if (group_content[j] == '(')
+                    {
+                        g_group_counter++;
+                    }
+                }
                 
                 // Check if it contains | at the top level (alternation)
                 bool has_alternation = false;
                 int paren_depth = 0;
-                for (char c : group_content)
+                for (size_t j = 0; j < group_content.length(); j++)
                 {
+                    char c = group_content[j];
+                    if (c == '\\' && j + 1 < group_content.length())
+                    {
+                        j++; // Skip escaped character
+                        continue;
+                    }
                     if (c == '(') paren_depth++;
                     else if (c == ')') paren_depth--;
                     else if (c == '|' && paren_depth == 0)
@@ -159,20 +194,27 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern, bool reset
                 {
                     elem.is_alternation = true;
                     // Split by | at top level only
-                    size_t pos = 0;
                     paren_depth = 0;
                     std::string current;
                     for (size_t j = 0; j < group_content.length(); j++)
                     {
-                        if (group_content[j] == '(') paren_depth++;
-                        else if (group_content[j] == ')') paren_depth--;
-                        else if (group_content[j] == '|' && paren_depth == 0)
+                        char c = group_content[j];
+                        if (c == '\\' && j + 1 < group_content.length())
+                        {
+                            current += c;
+                            current += group_content[j + 1];
+                            j++;
+                            continue;
+                        }
+                        if (c == '(') paren_depth++;
+                        else if (c == ')') paren_depth--;
+                        else if (c == '|' && paren_depth == 0)
                         {
                             elem.alternatives.push_back(current);
                             current.clear();
                             continue;
                         }
-                        current += group_content[j];
+                        current += c;
                     }
                     elem.alternatives.push_back(current);
                 }
@@ -262,8 +304,8 @@ int match_alternation(const std::string& input, size_t input_pos,
     // Try each alternative
     for (const std::string& alt : element.alternatives)
     {
-        // Parse the alternative as its own pattern
-        std::vector<PatternElement> alt_elements = parse_pattern(alt, false);
+        // Parse the alternative as its own pattern with correct starting group number
+        std::vector<PatternElement> alt_elements = parse_pattern(alt, false, element.nested_group_start);
         
         // Try to match the alternative
         int alt_end = match_at_position(input, input_pos, alt_elements, 0);
@@ -326,8 +368,8 @@ int match_at_position(const std::string& input, size_t input_pos,
     // Handle capturing group (without alternation)
     if (element.is_capturing_group)
     {
-        // Parse the group content
-        std::vector<PatternElement> group_elements = parse_pattern(element.group_content, false);
+        // Parse the group content with the correct starting group number
+        std::vector<PatternElement> group_elements = parse_pattern(element.group_content, false, element.nested_group_start);
         
         // Try to match the group content
         int group_end = match_at_position(input, input_pos, group_elements, 0);
