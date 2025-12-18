@@ -59,14 +59,27 @@ struct PatternElement
     int min_count;   // used for {n,} and {n,m} - minimum count, -1 if not applicable
     int max_count;   // used for {n,m} - maximum count, -1 if no upper limit ({n,})
     bool is_alternation; // true if this is an alternation group (a|b|c)
+    bool is_capturing_group; // true if this is a capturing group (without |)
+    int group_number; // group number for capturing groups (1-based)
+    int backreference; // backreference number (1-based), 0 if not a backreference
     std::vector<std::string> alternatives; // list of alternatives for alternation
+    std::string group_content; // content inside capturing group
     
-    PatternElement() : quantifier('\0'), exact_count(0), min_count(-1), max_count(-1), is_alternation(false) {}
+    PatternElement() : quantifier('\0'), exact_count(0), min_count(-1), max_count(-1), 
+                       is_alternation(false), is_capturing_group(false), group_number(0), backreference(0) {}
 };
 
-// Parse pattern into elements (handles \d, \w, [abc], [^abc], (a|b), literals, and quantifiers)
-std::vector<PatternElement> parse_pattern(const std::string& pattern)
+// Global counter for group numbers during parsing
+static int g_group_counter = 0;
+
+// Parse pattern into elements (handles \d, \w, [abc], [^abc], (a|b), capturing groups, backreferences, literals, and quantifiers)
+std::vector<PatternElement> parse_pattern(const std::string& pattern, bool reset_counter = true)
 {
+    if (reset_counter)
+    {
+        g_group_counter = 0;
+    }
+    
     std::vector<PatternElement> elements;
     size_t i = 0;
     
@@ -76,9 +89,20 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern)
         
         if (pattern[i] == '\\' && i + 1 < pattern.length())
         {
-            // Escape sequence like \d or \w
-            elem.pattern = pattern.substr(i, 2);
-            i += 2;
+            char next = pattern[i + 1];
+            if (next >= '1' && next <= '9')
+            {
+                // Backreference \1, \2, etc.
+                elem.backreference = next - '0';
+                elem.pattern = pattern.substr(i, 2);
+                i += 2;
+            }
+            else
+            {
+                // Escape sequence like \d or \w
+                elem.pattern = pattern.substr(i, 2);
+                i += 2;
+            }
         }
         else if (pattern[i] == '[')
         {
@@ -97,23 +121,67 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern)
         }
         else if (pattern[i] == '(')
         {
-            // Alternation group (a|b|c)
-            size_t end = pattern.find(')', i);
-            if (end != std::string::npos)
+            // Find matching closing parenthesis (handle nested parens)
+            int depth = 1;
+            size_t end = i + 1;
+            while (end < pattern.length() && depth > 0)
+            {
+                if (pattern[end] == '(') depth++;
+                else if (pattern[end] == ')') depth--;
+                end++;
+            }
+            end--; // point to the closing ')'
+            
+            if (end < pattern.length())
             {
                 std::string group_content = pattern.substr(i + 1, end - i - 1);
-                elem.is_alternation = true;
                 elem.pattern = pattern.substr(i, end - i + 1);
                 
-                // Split by | to get alternatives
-                size_t pos = 0;
-                size_t pipe_pos;
-                while ((pipe_pos = group_content.find('|', pos)) != std::string::npos)
+                // Assign group number
+                g_group_counter++;
+                elem.group_number = g_group_counter;
+                
+                // Check if it contains | at the top level (alternation)
+                bool has_alternation = false;
+                int paren_depth = 0;
+                for (char c : group_content)
                 {
-                    elem.alternatives.push_back(group_content.substr(pos, pipe_pos - pos));
-                    pos = pipe_pos + 1;
+                    if (c == '(') paren_depth++;
+                    else if (c == ')') paren_depth--;
+                    else if (c == '|' && paren_depth == 0)
+                    {
+                        has_alternation = true;
+                        break;
+                    }
                 }
-                elem.alternatives.push_back(group_content.substr(pos));
+                
+                if (has_alternation)
+                {
+                    elem.is_alternation = true;
+                    // Split by | at top level only
+                    size_t pos = 0;
+                    paren_depth = 0;
+                    std::string current;
+                    for (size_t j = 0; j < group_content.length(); j++)
+                    {
+                        if (group_content[j] == '(') paren_depth++;
+                        else if (group_content[j] == ')') paren_depth--;
+                        else if (group_content[j] == '|' && paren_depth == 0)
+                        {
+                            elem.alternatives.push_back(current);
+                            current.clear();
+                            continue;
+                        }
+                        current += group_content[j];
+                    }
+                    elem.alternatives.push_back(current);
+                }
+                else
+                {
+                    // Pure capturing group
+                    elem.is_capturing_group = true;
+                    elem.group_content = group_content;
+                }
                 
                 i = end + 1;
             }
@@ -178,6 +246,9 @@ std::vector<PatternElement> parse_pattern(const std::string& pattern)
     return elements;
 }
 
+// Captured groups storage (index 0 unused, groups are 1-based)
+static std::vector<std::string> g_captured_groups(10);
+
 // Forward declaration for recursion
 int match_at_position(const std::string& input, size_t input_pos, 
                       const std::vector<PatternElement>& elements, size_t elem_idx);
@@ -192,12 +263,18 @@ int match_alternation(const std::string& input, size_t input_pos,
     for (const std::string& alt : element.alternatives)
     {
         // Parse the alternative as its own pattern
-        std::vector<PatternElement> alt_elements = parse_pattern(alt);
+        std::vector<PatternElement> alt_elements = parse_pattern(alt, false);
         
         // Try to match the alternative
         int alt_end = match_at_position(input, input_pos, alt_elements, 0);
         if (alt_end != -1)
         {
+            // Capture the matched text for this group
+            if (element.group_number > 0 && element.group_number < 10)
+            {
+                g_captured_groups[element.group_number] = input.substr(input_pos, alt_end - input_pos);
+            }
+            
             // Alternative matched, now try to match the rest of the pattern
             int result = match_at_position(input, alt_end, elements, elem_idx + 1);
             if (result != -1)
@@ -221,6 +298,53 @@ int match_at_position(const std::string& input, size_t input_pos,
     }
     
     const PatternElement& element = elements[elem_idx];
+    
+    // Handle backreference
+    if (element.backreference > 0)
+    {
+        const std::string& captured = g_captured_groups[element.backreference];
+        if (captured.empty())
+        {
+            return -1; // Referenced group hasn't been captured yet
+        }
+        
+        // Check if the captured text matches at current position
+        if (input_pos + captured.length() > input.length())
+        {
+            return -1;
+        }
+        
+        if (input.substr(input_pos, captured.length()) != captured)
+        {
+            return -1;
+        }
+        
+        // Backreference matched, continue with next element
+        return match_at_position(input, input_pos + captured.length(), elements, elem_idx + 1);
+    }
+    
+    // Handle capturing group (without alternation)
+    if (element.is_capturing_group)
+    {
+        // Parse the group content
+        std::vector<PatternElement> group_elements = parse_pattern(element.group_content, false);
+        
+        // Try to match the group content
+        int group_end = match_at_position(input, input_pos, group_elements, 0);
+        if (group_end == -1)
+        {
+            return -1;
+        }
+        
+        // Capture the matched text
+        if (element.group_number > 0 && element.group_number < 10)
+        {
+            g_captured_groups[element.group_number] = input.substr(input_pos, group_end - input_pos);
+        }
+        
+        // Continue matching the rest of the pattern
+        return match_at_position(input, group_end, elements, elem_idx + 1);
+    }
     
     // Handle alternation group
     if (element.is_alternation)
@@ -429,6 +553,12 @@ bool match_at_position_bool(const std::string& input, size_t start, const std::v
 // Returns {-1, -1} if no match
 std::pair<int, int> match_pattern_core(const std::string& input_line, const std::string& pattern) 
 {
+    // Reset captured groups
+    for (int i = 0; i < 10; i++)
+    {
+        g_captured_groups[i].clear();
+    }
+    
     std::string actual_pattern = pattern;
     bool anchor_start = false;
     bool anchor_end = false;
