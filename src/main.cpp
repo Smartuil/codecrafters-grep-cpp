@@ -369,24 +369,58 @@ int match_at_position(const std::string& input, size_t input_pos,
     if (element.is_capturing_group)
     {
         // Parse the group content - nested groups start from this group's number
-        // (so they get numbers group_number+1, group_number+2, etc.)
         std::vector<PatternElement> group_elements = parse_pattern(element.group_content, false, element.group_number);
         
-        // Try to match the group content
-        int group_end = match_at_position(input, input_pos, group_elements, 0);
-        if (group_end == -1)
+        // Find all possible match end positions for the group (greedy: longest first)
+        std::vector<size_t> possible_ends;
+        for (size_t end_pos = input.length(); end_pos >= input_pos; end_pos--)
         {
-            return -1;
+            // Save current captured groups state
+            std::vector<std::string> saved_groups = g_captured_groups;
+            
+            int group_end = match_at_position(input.substr(0, end_pos), input_pos, group_elements, 0);
+            if (group_end != -1 && static_cast<size_t>(group_end) == end_pos)
+            {
+                possible_ends.push_back(end_pos);
+            }
+            
+            // Restore captured groups for next attempt
+            g_captured_groups = saved_groups;
+            
+            if (end_pos == input_pos)
+            {
+                break;
+            }
         }
         
-        // Capture the matched text for this group
-        if (element.group_number > 0 && element.group_number < 10)
+        // Try each possible end position (greedy: longest first)
+        for (size_t end_pos : possible_ends)
         {
-            g_captured_groups[element.group_number] = input.substr(input_pos, group_end - input_pos);
+            // Re-match to set nested captured groups correctly
+            std::vector<std::string> saved_groups = g_captured_groups;
+            int group_end = match_at_position(input.substr(0, end_pos), input_pos, group_elements, 0);
+            
+            if (group_end != -1)
+            {
+                // Capture the matched text for this group
+                if (element.group_number > 0 && element.group_number < 10)
+                {
+                    g_captured_groups[element.group_number] = input.substr(input_pos, group_end - input_pos);
+                }
+                
+                // Try to match the rest of the pattern
+                int result = match_at_position(input, group_end, elements, elem_idx + 1);
+                if (result != -1)
+                {
+                    return result;
+                }
+            }
+            
+            // Restore and try next
+            g_captured_groups = saved_groups;
         }
         
-        // Continue matching the rest of the pattern
-        return match_at_position(input, group_end, elements, elem_idx + 1);
+        return -1;
     }
     
     // Handle alternation group
